@@ -6,10 +6,6 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/**
- * Parle à ton api.php sur InfinityFree.
- * Change BASE_URL par ton vrai domaine.
- */
 object ApiClient {
 
     const val BASE_URL = "https://vint.42web.io/api.php"
@@ -17,6 +13,13 @@ object ApiClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            chain.proceed(request)
+        }
         .build()
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("asp", Context.MODE_PRIVATE)
@@ -31,7 +34,6 @@ object ApiClient {
         prefs(ctx).edit().remove("token").apply()
     }
 
-    /** Appel POST générique vers api.php avec les paramètres donnés. */
     fun post(ctx: Context, params: Map<String, String>, callback: (JSONObject?, String?) -> Unit) {
         val formBuilder = FormBody.Builder()
         params.forEach { (k, v) -> formBuilder.add(k, v) }
@@ -58,7 +60,8 @@ object ApiClient {
                 try {
                     callback(JSONObject(body), null)
                 } catch (e: Exception) {
-                    callback(null, "Réponse invalide (code ${response.code})")
+                    val snippet = body.take(80).replace("\n", " ")
+                    callback(null, "Réponse invalide (code ${response.code}): $snippet")
                 }
             }
         })
