@@ -1,61 +1,69 @@
 package net.ghostpython.asp
 
-import android.content.Intent
-import android.os.Bundle
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
+import android.content.Context
+import okhttp3.*
+import org.json.JSONObject
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
-class LoginActivity : AppCompatActivity() {
+object ApiClient {
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_login)
+    const val BASE_URL = "https://vint.42web.io/api.php"
 
-        // Déjà connecté ? On saute direct au feed.
-        if (ApiClient.getToken(this) != null) {
-            startActivity(Intent(this, FeedActivity::class.java))
-            finish()
-            return
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            chain.proceed(request)
+        }
+        .build()
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("asp", Context.MODE_PRIVATE)
+
+    fun saveToken(ctx: Context, token: String) {
+        prefs(ctx).edit().putString("token", token).apply()
+    }
+
+    fun getToken(ctx: Context): String? = prefs(ctx).getString("token", null)
+
+    fun clearToken(ctx: Context) {
+        prefs(ctx).edit().remove("token").apply()
+    }
+
+    fun post(ctx: Context, params: Map<String, String>, callback: (JSONObject?, String?) -> Unit) {
+        val formBuilder = FormBody.Builder()
+        params.forEach { (k, v) -> formBuilder.add(k, v) }
+
+        val requestBuilder = Request.Builder()
+            .url(BASE_URL)
+            .post(formBuilder.build())
+
+        getToken(ctx)?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
         }
 
-        val inputIdent = findViewById<EditText>(R.id.inputIdent)
-        val inputPassword = findViewById<EditText>(R.id.inputPassword)
-        val btnLogin = findViewById<Button>(R.id.btnLogin)
-        val txtError = findViewById<TextView>(R.id.txtError)
-
-        btnLogin.setOnClickListener {
-            val ident = inputIdent.text.toString().trim()
-            val pass = inputPassword.text.toString()
-
-            if (ident.isEmpty() || pass.isEmpty()) {
-                txtError.text = "Remplis les deux champs."
-                return@setOnClickListener
+        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback(null, "Connexion impossible : ${e.message}")
             }
 
-            btnLogin.isEnabled = false
-            txtError.text = ""
-
-            ApiClient.post(
-                this,
-                mapOf("action" to "mobile_login", "ident" to ident, "password" to pass, "device" to "android")
-            ) { json, error ->
-                runOnUiThread {
-                    btnLogin.isEnabled = true
-                    if (error != null) {
-                        txtError.text = error
-                        return@runOnUiThread
-                    }
-                    if (json?.optBoolean("ok") == true) {
-                        ApiClient.saveToken(this, json.getString("token"))
-                        startActivity(Intent(this, FeedActivity::class.java))
-                        finish()
-                    } else {
-                        txtError.text = json?.optString("error") ?: "Erreur inconnue."
-                    }
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string()
+                if (body == null) {
+                    callback(null, "Réponse vide du serveur")
+                    return
+                }
+                try {
+                    callback(JSONObject(body), null)
+                } catch (e: Exception) {
+                    val snippet = body.take(80).replace("\n", " ")
+                    callback(null, "Réponse invalide (code ${response.code}): $snippet")
                 }
             }
-        }
+        })
     }
 }

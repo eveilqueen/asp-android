@@ -1,53 +1,69 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="32dp"
-    android:background="#050508">
+package net.ghostpython.asp
 
-    <ImageView
-        android:layout_width="90dp"
-        android:layout_height="90dp"
-        android:layout_marginBottom="24dp"
-        android:src="@mipmap/ic_launcher" />
+import android.content.Context
+import okhttp3.*
+import org.json.JSONObject
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
-    <EditText
-        android:id="@+id/inputIdent"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Numéro ou pseudo"
-        android:textColorHint="#667"
-        android:textColor="#fff"
-        android:padding="14dp"
-        android:layout_marginBottom="12dp"
-        android:background="#0f0f16" />
+object ApiClient {
 
-    <EditText
-        android:id="@+id/inputPassword"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Mot de passe"
-        android:textColorHint="#667"
-        android:textColor="#fff"
-        android:inputType="textPassword"
-        android:padding="14dp"
-        android:layout_marginBottom="16dp"
-        android:background="#0f0f16" />
+    const val BASE_URL = "https://vint.42web.io/api.php"
 
-    <Button
-        android:id="@+id/btnLogin"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Se connecter"
-        android:backgroundTint="#448AFF" />
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .build()
+            chain.proceed(request)
+        }
+        .build()
 
-    <TextView
-        android:id="@+id/txtError"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#ff3d57"
-        android:layout_marginTop="12dp" />
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("asp", Context.MODE_PRIVATE)
 
-</LinearLayout>
+    fun saveToken(ctx: Context, token: String) {
+        prefs(ctx).edit().putString("token", token).apply()
+    }
+
+    fun getToken(ctx: Context): String? = prefs(ctx).getString("token", null)
+
+    fun clearToken(ctx: Context) {
+        prefs(ctx).edit().remove("token").apply()
+    }
+
+    fun post(ctx: Context, params: Map<String, String>, callback: (JSONObject?, String?) -> Unit) {
+        val formBuilder = FormBody.Builder()
+        params.forEach { (k, v) -> formBuilder.add(k, v) }
+
+        val requestBuilder = Request.Builder()
+            .url(BASE_URL)
+            .post(formBuilder.build())
+
+        getToken(ctx)?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
+        }
+
+        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback(null, "Connexion impossible : ${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string()
+                if (body == null) {
+                    callback(null, "Réponse vide du serveur")
+                    return
+                }
+                try {
+                    callback(JSONObject(body), null)
+                } catch (e: Exception) {
+                    val snippet = body.take(80).replace("\n", " ")
+                    callback(null, "Réponse invalide (code ${response.code}): $snippet")
+                }
+            }
+        })
+    }
+}
