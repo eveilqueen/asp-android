@@ -9,16 +9,20 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
 
     const val BASE_URL = "https://vint.42web.io/api.php"
+    const val ROOT_URL = "https://vint.42web.io/"
+
+    @Volatile
+    var siteCookie: String? = null
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
+            val builder = chain.request().newBuilder()
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
                 .header("Accept", "application/json, text/plain, */*")
-                .build()
-            chain.proceed(request)
+            siteCookie?.let { builder.header("Cookie", it) }
+            chain.proceed(builder.build())
         }
         .build()
 
